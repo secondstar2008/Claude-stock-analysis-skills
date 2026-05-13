@@ -14,33 +14,121 @@ Perform institutional-grade equity analysis on any stock, for any market, using 
 
 1. **Identify the stock**: Extract ticker + exchange if given (e.g., VNM:HOSE, AAPL:NASDAQ). If ambiguous, clarify.
 2. **Determine scope**: Full report vs. specific section(s). If the user says "analyze X", run all sections. If they say "give me the bull/bear on X", run only that section.
-3. **Gather data**: Use `web_search` to fetch current, real data before writing any section. Do NOT rely on training data alone for financials, prices, or recent events.
-4. **Write each section** using the exact prompts below as your analytical framework.
-5. **Format the output** cleanly using markdown headers per section.
+3. **Detect sector** (Vietnamese stocks only): Identify which sector the company belongs to and activate the corresponding deep-data layer in FiinData. See Sector Data Routing below.
+4. **Gather data**: Follow the tiered Data Gathering Protocol below. Do NOT rely on training data alone for financials, prices, or recent events.
+5. **Write each section** using the exact prompts below as your analytical framework.
+6. **Format the output** cleanly using markdown headers per section.
 
 ---
 
 ## Data Gathering Protocol
 
-Before writing, search for:
-- Company overview and business model (1–2 searches)
-- Latest financials: revenue, EBITDA, EPS, margins (1–2 searches)
-- Most recent earnings release and earnings call transcript or summary
-- Analyst consensus estimates and price targets
-- Recent stock price history and major catalysts
-- Key competitors and their valuation multiples
-- Management team background and insider ownership
-- Any recent red flags: accounting changes, regulatory issues, related-party transactions
+### For Vietnamese Stocks (HOSE / HNX) — FiinData-Native Workflow
 
-For **Vietnamese stocks** (HOSE/HNX): search CafeF, VNDirect, SSI Research, HOSE disclosures, and FiinGroup in addition to general sources.
-For **US stocks**: search SEC filings (10-K, 10-Q), earnings call transcripts (Seeking Alpha, Motley Fool), Bloomberg, and FactSet consensus.
-For **global stocks**: adapt sources to local exchange/regulator filings.
+FiinData is Dragon Capital's proprietary research platform. Treat it as the primary source for Vietnamese stocks; use web_search only to fill specific gaps. Query in this order:
+
+**Step 0 — Internal analyst notes (always first):**
+- `IRIS_Company_Comments` (filter `ISDELETED = 0`, ORDER BY `CREATEDATE DESC`) — internal Dragon Capital analyst notes: earnings flashes, "coffee with management" debriefs, stock-in-focus updates. These take priority over all external sources. A DC analyst's earnings flash is worth more than five broker reports for Sections 6, 7, and 13.
+
+**Step 1 — Snapshot and market data:**
+- `get_stock_snapshot` (all flags on) — price, valuation, sentiment summary, broker consensus summary
+- `Market_Data` (last 90 days) — OHLCV, foreign flow (matched + deal split), foreign holding %, foreign room remaining, block deal activity
+- `DC_holding` (last 30 days) — Dragon Capital fund positioning (ETF / onshore / offshore). Detect accumulation or distribution.
+
+**Step 2 — Financials:**
+- `FA_Quarterly` via `mssql_read_data` — 8 quarters of key FS lines (Net_Revenue, Gross_Profit, Gross_Margin, EBITDA, NPATMI, Operating_CF, FCF, Total_Asset, Total_Liabilities, TOTAL_Equity, ST_Debt, LT_Debt, Net_DER). YoY column is stored as ratio change (0.45 = +45%) — convert before displaying.
+- `FA_Annual` — for multi-year trend analysis
+- `CompanyModels` via `mongo_find` — analyst's full segment-level P&L model with quarterly and annual data, plus forward estimates. Includes Operation.Secured_Backlog and Operation.Potential_Backlog when populated.
+
+**Step 3 — Research and consensus:**
+- `supabase_consensus_analyze` (comparisons=5) — external broker target prices, NPATMI forecast spread, sentiment shifts
+- `Forecast` table — Dragon Capital's house forecast. Cross-check against consensus — house view divergence is signal.
+
+**Step 4 — Sentiment:**
+- `f319_stock_thesis_get` — community thesis (flag if release_date > 6 months old)
+- `f319_stock_discussion_points` (sort_by="signal", last 90 days) — flag if < 2 distinct threads
+- Zalo signals from `get_stock_snapshot` — flag if recommendations < 5
+
+**Step 5 — Order flow context (optional, for Section 9):**
+- `stock_cvd` — intraday tick-level buy/sell pressure (only available for ~70 large-cap stocks)
+
+**Step 6 — Sector deep layer:** see Sector Data Routing below.
+
+**Step 7 — Mandatory web_search:** audited annual report for FS notes. FiinData does not carry FS notes. This step is non-negotiable before completing Section 12 (Red Flags).
+
+---
+
+### Sector Data Routing — Vietnamese Stocks
+
+After identifying the ticker, determine sector and activate the relevant deep layer:
+
+| Sector | FiinData Sources | What it adds |
+|---|---|---|
+| **O&G / O&G Services** | `O&GProjectsData` (MongoDB) | Project-level pipeline: Capex, reserves, investors, EPC status, first-oil dates. Cross-reference with `CompanyModels.Operation.Secured_Backlog` |
+| **Real Estate** | `RE_Company_Project_RNAV_Detail`, `RE_Market_State_Quarterly`, `RE_Ministry_of_Construction_Quarterly_Data`, `RE_CBRE_Quarterly_Market_Report`, `RE_DXS_Quarterly_Market_Report`, `RE_Stock_Valuation_Latest` | RNAV by project, market state, CBRE/DXS research |
+| **Banking** | Use `query_banking_credit` tool (pre-built; covers NPL, NIM, ROE/ROA, deposit rates, write-offs, system-wide credit/deposit) | Specialized banking sector tool — preferred over raw queries |
+| **Steel** | `Steel_data`, `ThiTruongThepPrices` (MongoDB) | Steel sector data, input cost pricing |
+| **Power** | `Power_Projects`, `Power_Company_Operations`, `Power_Metrics`, `Power_Reservoir_Metrics`, `Power_Reference` | Plant-level operations, reservoir levels (hydro), project pipeline |
+| **Aviation** | `Aviation_Operations`, `Aviation_Revenue`, `Aviation_Airfare`, `Aviation_Market` | Load factors, route-level revenue, airfare pricing |
+| **Brokerage / Securities** | `BrokerageMetrics` (KEYCODE format, 201 codes), `Brokerage_Propbook`, `Brokerage_Market_Share` | Margin lending, prop trading, commissions, market share |
+| **Agriculture** | `AgroMonitor`, `AgroMonitorDaily` | Commodity/crop monitoring |
+| **Other / Macro context** | `macro_data_consolidated`, `ceic_macro_data`, `Commodity` | Vietnam macro series, commodities |
+
+If no sector match, proceed with universal layer only and note the gap in the output.
+
+---
+
+### For US Stocks (NYSE / NASDAQ)
+
+Use `web_search` for: SEC filings (10-K, 10-Q, 8-K), earnings call transcripts (Seeking Alpha, Motley Fool), Bloomberg / FactSet consensus, analyst notes. Note any relevant regulatory or antitrust exposure.
+
+### For Global Stocks
+
+Adapt to local exchange filings and accounting standards (IFRS vs. GAAP). Normalize financials to USD for comparability.
+
+---
+
+## Data Quality Rules
+
+These rules apply to every output and must be respected silently in the background:
+
+1. **Revenue fallback.** `get_stock_snapshot` has a known bug where `Net_Revenue` returns null. Always cross-check against `FA_Quarterly` directly when revenue figures matter.
+
+2. **Minimum signal thresholds.** Do not treat thin samples as actionable consensus:
+   - F319: require ≥ 2 distinct threads (not multiple re-analyses of one thread) before calling community sentiment meaningful
+   - Zalo: require ≥ 5 recommendations before stating a consensus; below that, note "thin sample"
+   - Broker consensus: note when only 1–2 brokers are represented vs. 5+
+
+3. **YoY column interpretation.** `FA_Quarterly.YoY` is stored as a ratio change (0.45 = +45%), not percentage points. Convert before displaying — especially critical when YoY appears alongside margin figures (which are already in decimal form) to avoid misreading.
+
+4. **Staleness checks.** Flag F319 thesis as stale if `release_date` > 6 months old. Empty `bear_points: []` on a stale thesis should be treated as missing data, not as evidence there are no bear arguments.
+
+5. **DC coverage detection.** If `IRIS_Company_Comments`, `CompanyModels`, and `Forecast` all return empty for a Vietnamese ticker, the stock is not under DC coverage. Note this gap and rely more heavily on external broker consensus and web_search.
 
 ---
 
 ## Analytical Sections
 
 Run each section using the framework below. For full reports, run all 14. For targeted requests, run only the relevant section(s).
+
+### Section-to-Data-Source Mapping (Vietnamese stocks)
+
+| Section | Primary FiinData Source | Notes |
+|---|---|---|
+| 1. Company Overview | `CompanyModels` segments + sector deep layer | |
+| 2. Bull vs. Bear | `IRIS_Company_Comments`, `f319_stock_thesis_get`, `f319_stock_discussion_points` | |
+| 3. Competitive Advantages | `CompanyModels` margin by segment vs. peers | |
+| 4. Supply Chain | Sector deep layer (e.g., `O&GProjectsData` for O&G) | |
+| 5. Segments | `CompanyModels.Financial.Breakdown` | |
+| 6. Earnings | `IRIS_Company_Comments` (earnings flash), `FA_Quarterly` (last 2 quarters), `supabase_consensus_analyze` | |
+| 7. Earnings Calls | `IRIS_Company_Comments` (management meeting notes), `supabase_consensus_analyze` comparison reports | |
+| 8. Management | `IRIS_Company_Comments`, `Market_Data.FOREIGN_HOLDING_PCT` trend, web_search for insider transactions | |
+| 9. Stock Price Analysis | `Market_Data` (90d price + foreign flow), `DC_holding` (30d positioning), `MarketIndex` for beta, `stock_cvd` for tape colour | |
+| 10. Comps | `FA_Annual` for subject; web_search for peer multiples | |
+| 11. Forward Projections | `CompanyModels` forward estimates, `Forecast` (house view), `supabase_consensus_analyze` (street view) | |
+| 12. Red Flags | `FA_Quarterly` (CF vs. NI divergence) + **mandatory web_search for FS notes** | |
+| 13. Management Questions | `IRIS_Company_Comments` (gaps in DC's own analyst notes are good question seeds) | |
+| 14. Devil's Advocate | `f319_stock_discussion_points` (sentiment_filter="bearish"), `supabase_consensus_analyze` (HSC and other conservative brokers) | |
 
 ---
 
@@ -78,7 +166,9 @@ Map the supply chain from upstream inputs to end customer. Include:
 - The company's position in the value chain
 - Key distributors, logistics partners, and retailers
 - End customers / demand drivers
-- Identify any single-source dependencies or supply chain vulnerabilities
+- Single-source dependencies or supply chain vulnerabilities
+
+For Vietnamese sector-heavy names, cross-reference the sector deep layer (e.g., `O&GProjectsData` shows project investors, blocks, and status; this maps the upstream customer base for O&G services companies like PVS).
 
 ---
 
@@ -89,6 +179,8 @@ Break down revenue, EBITDA, and earnings by segment:
 - Geographic segments
 - How have each of these changed over time and why?
 - Which segments are growing, declining, or under margin pressure?
+
+For Vietnamese stocks, pull from `CompanyModels.Financial.Breakdown` which carries revenue and gross profit by segment quarterly back to 2017 and forward to forecast years.
 
 ---
 
@@ -103,6 +195,8 @@ Analyze the company's most recent quarterly/annual earnings:
 - **Market reaction**: How did the stock react, and what does that signal about what was priced in?
 - Flag anything unusual relative to the company's recent history.
 
+For Vietnamese stocks, prioritize `IRIS_Company_Comments` earnings flash notes — they contain the specific provision/reversal breakdowns and non-core vs. core decomposition that external sources rarely have.
+
 ---
 
 ### 7. Earnings Calls
@@ -111,6 +205,8 @@ Summarize the company's recent earnings calls (last 2–4 quarters):
 - What themes is management focused on?
 - Perform sentiment analysis: how has management tone shifted over time?
 - Flag any notable changes in language around guidance, risk, or capital allocation.
+
+For Vietnamese stocks, `IRIS_Company_Comments` "Coffee with [ticker]" notes are post-management-meeting debriefs — treat them as transcript proxies.
 
 ---
 
@@ -123,6 +219,8 @@ Assess the CEO and key executives:
 4. **Red flags**: Related-party transactions, excessive compensation, frequent strategy pivots, or promotional behavior.
 5. **Founder vs. professional manager**: Which archetype, and what does that imply for this stage of the business?
 
+For Vietnamese stocks, also check `Market_Data.FOREIGN_HOLDING_PCT` trend and `DC_holding` trend for institutional positioning signals.
+
 ---
 
 ### 9. Stock Price Analysis
@@ -131,6 +229,8 @@ Identify historical catalysts behind the stock price:
 - What news or events moved the stock up or down more than 5% in the last 3–5 years?
 - Map the stock's major inflection points to the underlying business or macro events.
 - What does the pattern of price reactions say about market expectations?
+
+For Vietnamese stocks: combine `Market_Data` (90d price + foreign flow), `DC_holding` (30d institutional positioning), `MarketIndex` (relative performance vs VNINDEX / VN30 / sector index), and `stock_cvd` if available (intraday tape colour).
 
 ---
 
@@ -160,6 +260,8 @@ Estimate EPS (and where relevant, revenue and EBITDA) for the next 3 years. Cons
 
 Present base case, bull case, and bear case scenarios. Compare to current analyst consensus.
 
+For Vietnamese stocks: use `CompanyModels` forward estimates as base, `Forecast` as DC house view, and `supabase_consensus_analyze` for street consensus. The spread between these three is itself a signal.
+
 ---
 
 ### 12. Red Flags
@@ -172,6 +274,14 @@ Review across three statements:
 - **Cash flow**: Divergence between net income and operating cash flow, working capital manipulation, capex classification.
 - **Other**: Stock-based comp as a percentage of earnings, contingent liabilities, auditor changes or qualifications.
 
+**FiinData limitation — mandatory step:** FiinData does not contain notes to financial statements. Before completing this section, always `web_search` for the company's most recent audited annual report and specifically check for:
+- Related-party transactions and balances
+- Contingent liabilities and off-balance-sheet exposure
+- Auditor opinion (qualified, emphasis of matter, going concern)
+- Accounting policy changes vs. prior year
+
+If the annual report is unavailable, flag this gap explicitly in the output.
+
 ---
 
 ### 13. Management Questions
@@ -181,7 +291,9 @@ Generate 15 precise questions for the CEO, ordered by information value, coverin
 - Capital allocation priorities
 - Key risks management is most focused on
 - Segment-level performance drivers
-- Any areas where analyst consensus may be wrong
+- Areas where analyst consensus may be wrong
+
+For Vietnamese stocks, gaps in `IRIS_Company_Comments` (questions DC analysts have not yet answered in their own notes) are particularly good seeds.
 
 ---
 
@@ -207,7 +319,8 @@ Generate 15 precise questions for the CEO, ordered by information value, coverin
 - Use tables for Comps and Segments sections.
 - Use bullet points within sections; keep prose tight.
 - At the end of a full report, include a **Verdict** section: summarize whether the stock is a Buy / Hold / Avoid at current valuation, with a one-paragraph rationale.
-- If data was unavailable for a section (e.g., no earnings call transcripts found), note it clearly rather than fabricating.
+- If data was unavailable for a section, note it clearly rather than fabricating.
+- For Vietnamese stocks, cite specific data sources when using FiinData (e.g., "per DC analyst note May 6", "per FA_Quarterly Q1 2026", "per O&GProjectsData Block B status").
 
 ---
 
@@ -215,14 +328,13 @@ Generate 15 precise questions for the CEO, ordered by information value, coverin
 
 **Vietnamese stocks (HOSE/HNX)**:
 - Report financials in VND; convert to USD for comps if needed.
-- Reference relevant regulatory context: State ownership, FDI limits, room to buy.
-- Note sector-specific dynamics: banking (Basel II/III compliance, NPL ratios), real estate (land bank, legal risk), energy (FiT, DPPA, QHĐ8).
-- Sources: CafeF, VNDirect, SSI Research, HOSE/HNX disclosures, FiinGroup, Vietstock.
+- Reference regulatory context: State ownership, FDI limits, foreign room (see `Market_Data.FOREIGNCURRENTROOM` vs `FOREIGNTOTALROOM`).
+- Sector-specific dynamics already covered above in Sector Data Routing.
 
 **US stocks (NYSE/NASDAQ)**:
 - Reference SEC filings (10-K, 10-Q, 8-K), earnings call transcripts, and analyst consensus.
 - Note any relevant regulatory or antitrust exposure.
 
 **Global stocks**:
-- Adapt to local regulatory filings and accounting standards (IFRS vs. GAAP where relevant).
+- Adapt to local regulatory filings and accounting standards.
 - Convert financials to USD for comparability.
