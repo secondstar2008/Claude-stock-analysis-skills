@@ -189,9 +189,11 @@ For Vietnamese stocks, pull from `CompanyModels.Financial.Breakdown` which carri
 Analyze the company's most recent quarterly/annual earnings:
 - **Revenue & profit vs. expectations**: Did the company beat or miss consensus? By how much?
 - **Segment drivers**: Which business lines drove the result? Any notable acceleration or deceleration?
-- **Margin trends**: What happened to gross/operating margins and why?
-- **Guidance & outlook**: What did management guide for next quarter/full year? Any change in tone?
+- **Margin trends**: What happened to gross/operating margins and why? Flag any accounting-change effects (reclassifications, provision reversals, one-off items) that inflate or deflate the reported margin.
+- **Quarterly earnings strip** (required): Using the last 2–3 quarters from FA_Quarterly, identify non-recurring items (provision reversals, one-off FX, asset-sale gains). Strip these out to compute a *core* quarterly run-rate and annualise it. Compare to consensus NPATMI. If core annualised profit is materially below consensus, flag the gap explicitly. Caution: the snapshot's `profit_growth_yoy` field is unreliable when the prior-period NPATMI is negative — always verify against the FA_Quarterly strip directly before citing YoY growth for any swing-to-profit name.
+- **Guidance & outlook**: What did management guide for next quarter/full year? Check whether guidance appears conservative vs. the run-rate implied by the quarterly strip.
 - **Balance sheet flags**: Anything notable in cash flow, inventory, receivables, or debt?
+- **Operating CF vs. NPAT**: Explicitly compare operating cash flow to net profit for the latest period. A sustained divergence (positive NPAT, negative or weak operating CF) is a red flag requiring explanation.
 - **Market reaction**: How did the stock react, and what does that signal about what was priced in?
 - Flag anything unusual relative to the company's recent history.
 
@@ -199,12 +201,13 @@ For Vietnamese stocks, prioritize `IRIS_Company_Comments` earnings flash notes �
 
 ---
 
-### 7. Earnings Calls
+### 7. Earnings Commentary & Analyst Notes
 
-Summarize the company's recent earnings calls (last 2–4 quarters):
-- What themes is management focused on?
-- Perform sentiment analysis: how has management tone shifted over time?
-- Flag any notable changes in language around guidance, risk, or capital allocation.
+Synthesize management tone and analyst commentary across the last 4–6 earnings cycles. The goal is to surface a multi-quarter sentiment arc — has the tone shifted from cautious to constructive, or vice versa? Flag any notable changes in language around guidance, risk, or capital allocation.
+
+**For Vietnamese stocks**: Primary sources are (1) `IRIS_Company_Comments` (Tier 1 pull — DC internal analyst notes with Impact ratings, per quarter), and (2) giải trình kết quả kinh doanh letters and AGM presentations (Tier 2 web search). Synthesize across both: note the Impact rating trend (e.g., Negative → Neutral → Positive), flag any inflection quarters, and extract any forward-looking signals embedded in the commentary (capex ramp, discount/pricing commentary, debt reduction guidance). Vietnamese companies do not host English-language earnings calls — IRIS notes and giải trình letters are the functional equivalent.
+
+**For US/global stocks**: Primary sources are earnings call transcripts (Seeking Alpha, Motley Fool, company IR site). Summarize the last 2–4 calls. Perform sentiment analysis: how has management tone shifted over time?
 
 For Vietnamese stocks, `IRIS_Company_Comments` "Coffee with [ticker]" notes are post-management-meeting debriefs — treat them as transcript proxies.
 
@@ -244,6 +247,8 @@ Generate a comparables table with the company and its key global peers. Include:
 - P/E (NTM)
 - Dividend yield
 - 5-year average ROE
+
+**Net cash adjustment** (apply only if triggered): Compute net cash = cash + short-term investments − total debt. If net cash is positive *and* exceeds 25% of market cap, compute operating EV (market cap − net cash), restate EV/EBITDA on that basis, and disclose this adjustment prominently in the comps section. If the company is in net debt, or if net cash is below the 25% threshold, omit this sub-section entirely — do not mention the check or note that it was performed.
 
 Comment on where the subject company trades relative to peers and whether the premium or discount is justified.
 
