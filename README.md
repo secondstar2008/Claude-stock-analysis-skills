@@ -31,8 +31,8 @@ The output is intentionally adversarial: the framework forces the analyst (Claud
 | 7 | Earnings Commentary & Analyst Notes | IRIS notes + giải trình letters for Vietnamese names; earnings call transcripts for US/global |
 | 8 | Management | Track record, skin in the game, capital allocation; SOE parent-group direction |
 | 9 | Stock Price Analysis | Historical catalysts behind major moves |
-| 10 | Comps | Peer table with EV/Sales, EV/EBITDA, P/E NTM, ROE; operating EV shown only when net cash >25% of market cap |
-| 11 | Forward Projections | 3-year EPS scenarios: base, bull, bear; cost pass-through sensitivity for commodity producers |
+| 10 | Comps | Peer table with EV/Sales, EV/EBITDA, P/E NTM, ROE |
+| 11 | Forward Projections | 3-year EPS scenarios: base, bull, bear |
 | 12 | Red Flags | Forensic review of income statement, balance sheet, cash flow; FS notes sourcing guidance |
 | 13 | Management Questions | 15 high-information-value questions for the CEO |
 | 14 | Devil's Advocate | Short-seller dismantling of the bull case |
